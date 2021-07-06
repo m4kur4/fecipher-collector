@@ -58,8 +58,20 @@ def fetch_card_ids():
 	return result
 
 
+def get_unit_type(soup_converted):
+	"""ユニットタイプを取得する
+		例：光の剣／男／槍／アーマー
+	"""
+
+
+def get_skill_text(soup_converted):
+	"""スキルのテキストを取得する(画像から判定して頭に【[アクション1]】とかつけないといけないため)
+	"""
+	pass
+
+
 def scrape_card(card_id):
-	"""指定したIDのカード情報をスクレイピングする
+	"""指定したIDのカード情報を抽出する
 
 		Args:
 			(num) card_id カードID
@@ -74,14 +86,37 @@ def scrape_card(card_id):
 	soup = BeautifulSoup(response.text, 'html.parser')
 	soup_converted = html.fromstring(str(soup))
 
-	# /html/body/div/div[2]/h1
+	# /html/body/div[4]/div/main/div/div[2]/h1
 	print(soup_converted.xpath('/html/body/div[4]/div/main/div/div[2]/h1'))
 
 	# データを抽出
-	result['title'] = soup_converted.xpath('/html/body/div[4]/div/main/div/div[2]/h1')[0].text
+	result['ID'] = card_id
+	result['Title'] = soup_converted.xpath('/html/body/div[4]/div/main/div/div[2]/h1')[0].text.split(' ')[0]
+	result['Name'] = soup_converted.xpath('/html/body/div[4]/div/main/div/div[2]/h1')[0].text.split(' ')[1]
+	result['ClassRank'] = soup_converted.xpath('/html/body/div[4]/div/main/div/div[3]/dl[5]/dd')[0].text
+	result['ClassName'] = soup_converted.xpath('/html/body/div[4]/div/main/div/div[3]/dl[7]/dd')[0].text
+	result['EntryCost'] = soup_converted.xpath('/html/body/div[4]/div/main/div/div[3]/dl[1]/dd')[0].text
+	result['CCCost'] = soup_converted.xpath('/html/body/div[4]/div/main/div/div[3]/dl[3]/dd')[0].text
+	result['Attack'] = soup_converted.xpath('/html/body/div[4]/div/main/div/div[3]/dl[9]/dd')[0].text.replace('\r\n' , '' ).replace(' ' , '' )
+	result['Support'] = soup_converted.xpath('/html/body/div[4]/div/main/div/div[3]/dl[11]/dd')[0].text.replace('\r\n' , '' ).replace(' ' , '' )
+	result['Range'] = soup_converted.xpath('/html/body/div[4]/div/main/div/div[3]/dl[10]/dd')[0].text
+	result['UnitType'] = soup_converted.xpath('/html/body/div[4]/div/main/div/div[3]/dl[8]/dd')[0].text.replace('\r\n' , '' ).replace(' ' , '' )
+	result['SkillName1'] = soup_converted.xpath('/html/body/div[4]/div/main/div/div[4]/table/tbody/tr/td/dl/dt')[0].text
+	# result['SkillType1'] = soup_converted.xpath('')[0].text
+	# result['SkillText1'] = soup_converted.xpath('')[0].text
+	# result['SkillName2'] = soup_converted.xpath('')[0].text
+	# result['SkillType2'] = soup_converted.xpath('')[0].text
+	# result['SkillText2'] = soup_converted.xpath('')[0].text
+	# result['SkillName3'] = soup_converted.xpath('')[0].text
+	# result['SkillType3'] = soup_converted.xpath('')[0].text
+	# result['SkillText3'] = soup_converted.xpath('')[0].text
+	# result['SkillName4'] = soup_converted.xpath('')[0].text
+	# result['SkillType4'] = soup_converted.xpath('')[0].text
+	# result['SkillText4'] = soup_converted.xpath('')[0].text
 
 	print(result)
 	return result
+
 
 if __name__ == "__main__":
 	# ブースターパックの一覧を取得
