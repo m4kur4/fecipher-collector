@@ -88,7 +88,7 @@ def fetch_card_id(list_id):
 			(list) カード識別ID
 	"""
 	# DOSにならないようにsleep
-	time.sleep(1)
+	time.sleep(3)
 	result = []
 
 	# カード一覧のURL
@@ -242,6 +242,7 @@ def convert_skill_img_to_text(skill_text):
 		.replace('<img src="' + ICON_LIS + '"/>', '【LIS】')\
 		.replace('<img src="' + ICON_CP + '"/>', '【CP】')\
 		.replace('<img src="' + ICON_ONCE + '"/>', '[1ターンに1回] ')\
+		.replace('<img src="' + ICON_ACT + '"/>', '[アクション] ')\
 		.replace('<img src="' + ICON_REV_1 + '"/>', '[リバース.1] ')\
 		.replace('<img src="' + ICON_REV_2 + '"/>', '[リバース.2] ')\
 		.replace('<img src="' + ICON_REV_3 + '"/>', '[リバース.3] ')\
@@ -358,7 +359,7 @@ def scrape_card(card_id):
 			(dict) カード情報
 	"""
 	# DOSにならないようにsleep
-	time.sleep(1)
+	time.sleep(3)
 	result = {}
 
 	url = f'https://fecipher.jp/cards/{card_id}/'
@@ -408,6 +409,15 @@ def scrape_card(card_id):
 		result[f'SkillName{i}'] = ''
 		result[f'SkillType{i}'] = ''
 		result[f'SkillText{i}'] = ''
+
+	# 画像をダウンロード
+	time.sleep(3)
+	image_url = soup_converted.xpath('/html/body/div[4]/div/main/div/div[1]/p[1]/img')[0].get('src')
+	print(image_url)
+	re = requests.get(image_url)
+
+	with open(f'./img/{card_id}.jpg', 'wb') as f:
+		f.write(re.content)
 
 	# print(result)
 	return result
@@ -475,10 +485,13 @@ if __name__ == "__main__":
 		card_info = convert_cart_info_to_list(card_info_org)
 		card_infos.append(card_info)
 
+		## 動作確認用
 		count += 1
 		if count > 0:
 			break
-	print(card_infos)
+		## /動作確認用
+
+	# print(card_infos)
 
 	with open('result.csv', 'w', encoding='UTF-8') as f:
 		writer = csv.writer(f)
