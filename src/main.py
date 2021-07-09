@@ -1,10 +1,15 @@
 import csv
+import glob
 import re
 import requests
 import time
 
 from lxml import html, etree
 from bs4 import BeautifulSoup
+
+# 開始位置設定(関数探すのめんどくさいのでここに書く)
+SET_START_BT = 6
+SET_START_ST = 1
 
 # スキル(タイプ)
 BASE_URL = 'https://fecipher.jp/cards/'
@@ -109,7 +114,7 @@ def fetch_card_id(list_id):
 	return result
 
 
-def fetch_card_ids():
+def fetch_list_ids():
 	"""全ての弾についてカードの識別IDを取得する
 
 		Returns:
@@ -117,15 +122,15 @@ def fetch_card_ids():
 	"""
 	result = []
 
-	# ブースターパック
-	for i in range(1, 23):
+	# ブースターパック 1-5済
+	for i in range(SET_START_BT, 23):
 		list_id = f'bt00{i:02}'
-		result += fetch_card_ids(list_id)
+		result.append(list_id)
 	
 	# スターターデッキ
-	for i in range(1, 13):
+	for i in range(SET_START_ST, 13):
 		list_id = f'st00{i:02}'
-		result += fetch_card_ids(list_id)
+		result.append(list_id)
 
 	return result
 
@@ -157,16 +162,27 @@ def get_unit_type(elements_dict):
 	elm_symbol = elements_dict['symbol']	
 	elm_gender = elements_dict['gender']	
 	elm_weapon = elements_dict['weapon']	
-	elm_types = elements_dict['types'][0]
+	elm_types = elements_dict['types']
 
 	symbol = elm_symbol[0].get('alt')
-	gender = elm_gender[0].get('alt')
-	weapon = elm_weapon[0].get('alt')
+
+	# 性別・武器はない場合があるため対応
+	gender = ''
+	if elm_gender == []:
+		gender = '（なし）'
+	else:
+		gender = elm_gender[0].get('alt')
+	weapon = ''
+	if elm_weapon == []:
+		weapon = '（なし）'
+	else:
+		weapon = elm_weapon[0].get('alt')
+
 	types_arr = []
 
 	result = f'{symbol}／{gender}／{weapon}'
-	if elm_types != []:
-		for elm_type in elm_types.findall('img'):
+	if elm_types != [] and elm_types[0].text != '（なし）':
+		for elm_type in elm_types[0].findall('img'):
 			types_arr.append(elm_type.get('alt'))
 		for type_str in types_arr:
 			result += f'／{type_str}'
@@ -269,7 +285,7 @@ def convert_skill_img_to_text(skill_text):
 		.replace('<img src="' + ICON_BOW + '"/>', '<弓>')\
 		.replace('<img src="' + ICON_MAGIC + '"/>', '<魔法>')\
 		.replace('<img src="' + ICON_STICK + '"/>', '<杖>')\
-		.replace('<img src="' + ICON_DORAGONSTONE + '"/>', '<竜意思>')\
+		.replace('<img src="' + ICON_DORAGONSTONE + '"/>', '<竜石>')\
 		.replace('<img src="' + ICON_DARKWEAPON + '"/>', '<暗器>')\
 		.replace('<img src="' + ICON_FANG + '"/>', '<牙>')\
 		.replace('<img src="' + ICON_FIST + '"/>', '<拳>')\
@@ -278,8 +294,7 @@ def convert_skill_img_to_text(skill_text):
 		.replace('<img src="' + ICON_MOUNTED + '"/>', '<獣馬>')\
 		.replace('<img src="' + ICON_DRAGON + '"/>', '<竜>')\
 		.replace('<img src="' + ICON_SHARP + '"/>', '<幻影>')\
-		.replace('<img src="' + ICON_EVIL + '"/>', '<魔物>')\
-		.replace('\n', '')
+		.replace('<img src="' + ICON_EVIL + '"/>', '<魔物>')
 
 	# 「&lt;幻影&gt;」のようなやつを消す
 	return re.sub('&lt;.+&gt;', '', result)
@@ -309,7 +324,7 @@ def get_skill_text(elements):
 	return ''.join(result_arr)
 
 
-def merge_skills(elements_dict):
+def merge_skills(elements_dict, card_id):
 	"""スキルのテキストを支援スキルまで含めて取得し、歯抜けなしの配列へマージする
 		/html/body/div[4]/div/main/div/div[4]/table/tr[1]/td/dl/dt
 		Args:
@@ -323,28 +338,66 @@ def merge_skills(elements_dict):
 	skill_support = elements_dict['skill_support']
 	result = []
 
-	# 通常スキルの設定
+	# 一番目のスキル枠
 	if skill_vanilla != []:
 		dts = skill_vanilla[0].findall('dt')
 		dds = skill_vanilla[0].findall('dd')
-		for i in range(0, len(dts)):
-			result.append({
-				'name': get_xpath_str([dts[i]]), 
-				'type': get_skill_type([dds[i]]), 
-				'text': get_skill_text([dds[i]]) 
-			})
-	
-	# 支援スキルの設定
+		# 一番目のスキル枠が通常スキルかどうかを判定(支援スキルだけの下級ロイで落ちた)
+		support_skill_nodes = [etree.tostring(node, encoding='utf-8').decode() for node in dts[0].iterdescendants()]
+		is_vanilla_skill = (len(support_skill_nodes) == 0)
+		if is_vanilla_skill:
+			# 通常スキル
+			for i in range(0, len(dts)):
+				result.append({
+					'name': get_xpath_str([dts[i]]), 
+					'type': get_skill_type([dds[i]]), 
+					'text': get_skill_text([dds[i]]) 
+				})
+		else:
+			# 支援スキル
+			for i in range(0, len(dts)):
+				# スキル名が img + テキストなので処理
+				skill_support_name = [etree.tostring(node, encoding='utf-8').decode() for node in dts[i].iterdescendants()][0]
+				result.append({
+					'name': re.sub('<.+>', '', skill_support_name), 
+					'type': get_skill_type([dts[i]]), 
+					'text': get_skill_text([dds[i]])
+				})
+
+	# 2番目のスキル枠(存在する場合は必ず支援スキル)の設定
 	if skill_support != []:
+
 		dts_s = skill_support[0].findall('dt')
 		dds_s = skill_support[0].findall('dd')
 		for i in range(0, len(dts_s)):
+			# 一部カードが誤植でテキスト側にタイプアイコンを埋め込んでいるため特殊処理
+			# bt05_真白き天馬騎士 シグルーン[5130]
+			if card_id in [5130]:
+				result.append({
+					'name': get_xpath_str([dts_s[i]]), 
+					'type': get_skill_type([dds_s[i]]), 
+					'text': get_skill_text([dds_s[i]])
+				})
+				continue
+
 			# スキル名が img + テキストなので処理
+			if len([etree.tostring(node, encoding='utf-8').decode() for node in dts_s[i].iterdescendants()]) == 0:
+				break
+
 			skill_support_name = [etree.tostring(node, encoding='utf-8').decode() for node in dts_s[i].iterdescendants()][0]
+
+			# たまに支援スキルのテキストで img 使っているパターンがあるので対応(bt6_シン[10497])
+			skill_support_text = ''
+			if len([etree.tostring(node, encoding='utf-8').decode() for node in dds_s[i].iterdescendants()]) == 0:
+				# 支援スキルのテキストに img が含まれない場合はテキストだけ抽出
+				skill_support_text = dds_s[i].text
+			else:
+				skill_support_text = [etree.tostring(node, encoding='utf-8').decode() for node in dds_s[i].iterdescendants()][0]
+
 			result.append({
 				'name': re.sub('<.+>', '', skill_support_name), 
 				'type': get_skill_type([dts_s[i]]), 
-				'text': dds_s[i].text 
+				'text': convert_skill_img_to_text(skill_support_text)
 			})
 
 	return result
@@ -374,6 +427,21 @@ def scrape_card(card_id):
 	# データを抽出
 	result['ID'] = card_id
 	result['Title'] = get_xpath_str(soup_converted.xpath('/html/body/div[4]/div/main/div/div[2]/h1')).split(' ')[0]
+	print(f'[debug] title ===> {result["Title"]}')
+	if result['Title'] == '':
+		# カードタイトルが撮れていない場合はエラーページを取得しているため、数秒待ってリトライ
+		count_retry = 0
+		while count_retry < 10:
+			print(f'[info] retry {count_retry}')
+
+			retry_result = scrape_card(card_id)
+			if (retry_result['Title'] != ''):
+				return retry_result
+
+			count_retry += 1
+		print('[err]retry > 10')
+		return None
+
 	result['Name'] = get_xpath_str(soup_converted.xpath('/html/body/div[4]/div/main/div/div[2]/h1')).replace(result['Title'] + ' ', '')
 	result['ClassRank'] = get_xpath_str(soup_converted.xpath('/html/body/div[4]/div/main/div/div[3]/dl[5]/dd'))
 	result['ClassName'] = get_xpath_str(soup_converted.xpath('/html/body/div[4]/div/main/div/div[3]/dl[7]/dd'))
@@ -382,7 +450,15 @@ def scrape_card(card_id):
 
 	result['Attack'] = get_xpath_str(soup_converted.xpath('/html/body/div[4]/div/main/div/div[3]/dl[9]/dd')).replace('\r\n' , '' ).replace(' ' , '' )
 	result['Support'] = get_xpath_str(soup_converted.xpath('/html/body/div[4]/div/main/div/div[3]/dl[11]/dd')).replace('\r\n' , '' ).replace(' ' , '' )
-	result['Range'] = get_xpath_str(soup_converted.xpath('/html/body/div[4]/div/main/div/div[3]/dl[10]/dd'))
+	
+	range_base = get_xpath_str(soup_converted.xpath('/html/body/div[4]/div/main/div/div[3]/dl[10]/dd'))
+	if range_base == '（なし）':
+		range_conv = '-'
+	elif range_base == '1-2':
+		range_conv = '12'
+	else:
+		range_conv = range_base
+	result['Range'] = range_conv
 
 	unit_types_soup_dict = {
 		'symbol': soup_converted.xpath('/html/body/div[4]/div/main/div/div[3]/dl[2]/dd/img'),
@@ -399,7 +475,7 @@ def scrape_card(card_id):
 		'skill_vanilla': soup_converted.xpath('/html/body/div[4]/div/main/div/div[4]/table/tr[1]/td/dl'),
 		'skill_support': soup_converted.xpath('/html/body/div[4]/div/main/div/div[4]/table/tr[2]/td/dl')
 	}
-	skills = merge_skills(skill_soup_dict)
+	skills = merge_skills(skill_soup_dict, card_id)
 	for i in range(0, len(skills)):
 		result[f'SkillName{i + 1}'] = skills[i]['name']
 		result[f'SkillType{i + 1}'] = skills[i]['type']
@@ -411,15 +487,21 @@ def scrape_card(card_id):
 		result[f'SkillText{i}'] = ''
 
 	# 画像をダウンロード
-	time.sleep(3)
-	image_url = soup_converted.xpath('/html/body/div[4]/div/main/div/div[1]/p[1]/img')[0].get('src')
-	print(image_url)
-	re = requests.get(image_url)
+	images = glob.glob('./img/*')
+	image_path = f'./img\\fe0_card_{int(card_id):06}.jpg'
+	if image_path not in images :
+		# 未ダウンロードの場合のみ取得
+		time.sleep(3)
+		image_url = soup_converted.xpath('/html/body/div[4]/div/main/div/div[1]/p[1]/img')[0].get('src')
+		print(image_url)
+		req = requests.get(image_url)
 
-	with open(f'./img/{card_id}.jpg', 'wb') as f:
-		f.write(re.content)
+		with open(image_path, 'wb') as f:
+			f.write(req.content)
+	else:
+		print(f'img dl skip {card_id}')
 
-	# print(result)
+	#print(result)
 	return result
 
 
@@ -431,30 +513,31 @@ def convert_cart_info_to_list(card_info):
 		Returns:
 			(list) カード情報の配列
 	"""
+	# カラム毎に考えるのめんどくさいので全部ベタでいらない文字ぽいぽいする
 	result = []
 	result.append(card_info['ID'])
-	result.append(card_info['Title'])
-	result.append(card_info['Name'])
-	result.append(card_info['ClassRank'])
-	result.append(card_info['ClassName'])
-	result.append(card_info['EntryCost'])
-	result.append(card_info['CCCost'])
-	result.append(card_info['Attack'])
-	result.append(card_info['Support'])
-	result.append(card_info['Range'])
-	result.append(card_info['UnitType'])
-	result.append(card_info['SkillName1'])
-	result.append(card_info['SkillType1'])
-	result.append(card_info['SkillText1'])
-	result.append(card_info['SkillName2'])
-	result.append(card_info['SkillType2'])
-	result.append(card_info['SkillText2'])
-	result.append(card_info['SkillName3'])
-	result.append(card_info['SkillType3'])
-	result.append(card_info['SkillText3'])
-	result.append(card_info['SkillName4'])
-	result.append(card_info['SkillType4'])
-	result.append(card_info['SkillText4'])
+	result.append(card_info['Title'].replace('\r\n', '').replace('\n', '').replace('"', '').replace('&#13;', '').replace(',', '/'))
+	result.append(card_info['Name'].replace('\r\n', '').replace('\n', '').replace('"', '').replace('&#13;', '').replace(',', '/'))
+	result.append(card_info['ClassRank'].replace('\r\n', '').replace('\n', '').replace('"', '').replace('&#13;', '').replace(',', '/'))
+	result.append(card_info['ClassName'].replace('\r\n', '').replace('\n', '').replace('"', '').replace('&#13;', '').replace(',', '/'))
+	result.append(card_info['EntryCost'].replace('\r\n', '').replace('\n', '').replace('"', '').replace('&#13;', '').replace(',', '/'))
+	result.append(card_info['CCCost'].replace('\r\n', '').replace('\n', '').replace('"', '').replace('&#13;', '').replace(',', '/'))
+	result.append(card_info['Attack'].replace('\r\n', '').replace('\n', '').replace('"', '').replace('&#13;', '').replace(',', '/'))
+	result.append(card_info['Support'].replace('\r\n', '').replace('\n', '').replace('"', '').replace('&#13;', '').replace(',', '/'))
+	result.append(card_info['Range'].replace('\r\n', '').replace('\n', '').replace('"', '').replace('&#13;', '').replace(',', '/'))
+	result.append(card_info['UnitType'].replace('\r\n', '').replace('\n', '').replace('"', '').replace('&#13;', '').replace(',', '/'))
+	result.append(card_info['SkillName1'].replace('\r\n', '').replace('\n', '').replace('"', '').replace('&#13;', '').replace(',', '/'))
+	result.append(card_info['SkillType1'].replace('\r\n', '').replace('\n', '').replace('"', '').replace('&#13;', '').replace(',', '/'))
+	result.append(card_info['SkillText1'].replace('\r\n', '').replace('\n', '').replace('"', '').replace('&#13;', '').replace(',', '/'))
+	result.append(card_info['SkillName2'].replace('\r\n', '').replace('\n', '').replace('"', '').replace('&#13;', '').replace(',', '/'))
+	result.append(card_info['SkillType2'].replace('\r\n', '').replace('\n', '').replace('"', '').replace('&#13;', '').replace(',', '/'))
+	result.append(card_info['SkillText2'].replace('\r\n', '').replace('\n', '').replace('"', '').replace('&#13;', '').replace(',', '/'))
+	result.append(card_info['SkillName3'].replace('\r\n', '').replace('\n', '').replace('"', '').replace('&#13;', '').replace(',', '/'))
+	result.append(card_info['SkillType3'].replace('\r\n', '').replace('\n', '').replace('"', '').replace('&#13;', '').replace(',', '/'))
+	result.append(card_info['SkillText3'].replace('\r\n', '').replace('\n', '').replace('"', '').replace('&#13;', '').replace(',', '/'))
+	result.append(card_info['SkillName4'].replace('\r\n', '').replace('\n', '').replace('"', '').replace('&#13;', '').replace(',', '/'))
+	result.append(card_info['SkillType4'].replace('\r\n', '').replace('\n', '').replace('"', '').replace('&#13;', '').replace(',', '/'))
+	result.append(card_info['SkillText4'].replace('\r\n', '').replace('\n', '').replace('"', '').replace('&#13;', '').replace(',', '/'))
 
 	return result
 
@@ -475,24 +558,37 @@ if __name__ == "__main__":
 	# for i in range(1, 2):
 	# 	scrape_card(card_ids[i])
 	####scrape_card(27567) # まもり
-	#scrape_card(5242) # ロイ(支援2つ持ち)
+	####scrape_card(5242) # ロイ(支援2つ持ち)
+	#print(convert_cart_info_to_list(scrape_card(10497)))
 
-	card_ids = fetch_card_id('st0001')
-	card_infos = []
-	count  =0
-	for card_id in card_ids:
-		card_info_org = scrape_card(card_id)
-		card_info = convert_cart_info_to_list(card_info_org)
-		card_infos.append(card_info)
+	#========================================
+	# ここから処理
+
+	list_ids = fetch_list_ids()
+	for list_id in list_ids:
+	##for list_id in ['st0001']:
+		print(f'start ===> {list_id}')
+		card_ids = fetch_card_id(list_id)
+	
+		card_infos = []
+		count  =0
+		for card_id in card_ids:
+			card_info_org = scrape_card(card_id)
+			card_info = convert_cart_info_to_list(card_info_org)
+			card_infos.append(card_info)
+
+			## 動作確認用
+			# count += 1
+			# if count > 0:
+			# 	break
+			## /動作確認用
 
 		## 動作確認用
-		count += 1
-		if count > 0:
-			break
+		# print(card_infos)
 		## /動作確認用
 
-	# print(card_infos)
+		with open(f'./csv/result_{list_id}.csv', 'w', encoding='UTF-8', newline="") as f:
+			writer = csv.writer(f, delimiter=",")
+			writer.writerows(card_infos)
 
-	with open('result.csv', 'w', encoding='UTF-8') as f:
-		writer = csv.writer(f)
-		writer.writerows(card_infos)
+		print(f'finish <=== {list_id}')
