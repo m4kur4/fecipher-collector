@@ -8,7 +8,7 @@ from lxml import html, etree
 from bs4 import BeautifulSoup
 
 # 開始位置設定(関数探すのめんどくさいのでここに書く)
-SET_START_BT = 6
+SET_START_BT = 10
 SET_START_ST = 1
 
 # スキル(タイプ)
@@ -164,18 +164,19 @@ def get_unit_type(elements_dict):
 	elm_weapon = elements_dict['weapon']	
 	elm_types = elements_dict['types']
 
-	symbol = elm_symbol[0].get('alt')
+	
 
-	# 性別・武器はない場合があるため対応
-	gender = ''
-	if elm_gender == []:
-		gender = '（なし）'
-	else:
+	# シンボル・性別・武器がない場合に対応
+	symbol = '（なし）'
+	if elm_symbol != []:
+		symbol = elm_symbol[0].get('alt')
+
+	gender = '（なし）'
+	if elm_gender != []:
 		gender = elm_gender[0].get('alt')
-	weapon = ''
-	if elm_weapon == []:
-		weapon = '（なし）'
-	else:
+
+	weapon = '（なし）'
+	if elm_weapon != []:
 		weapon = elm_weapon[0].get('alt')
 
 	types_arr = []
